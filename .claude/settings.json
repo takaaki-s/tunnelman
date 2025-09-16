@@ -1,0 +1,38 @@
+{
+    "permissions": {
+        "allow": [],
+        "deny": [
+            "Read(.env*)",
+            "Read(.envrc)",
+            "Read(*.pem)",
+            "Read(**/config/secrets.*)",
+            "Read(**/credentials/*)",
+            "Read(*_key)",
+            "Read(*_token)",
+            "Read(*.key)",
+            "Read(*.cert)",
+            "Read(*.p12)",
+            "Read(*.db)",
+            "Read(*.sqlite)",
+            "Read(*.sql.dump)",
+            "Read(/log/*)",
+            "Read(/tmp/*)",
+            "Read(*.log)",
+            "Read(/public/)",
+            "Read(/node_modules/)",
+            "Read(/.bundle/)",
+            "Read(*.js.map)",
+            "Read(*.css.map)",
+            "Read(/.vscode/)",
+            "Read(/.idea/)",
+            "Read(/sorbet/)",
+            "Read(*.swp)",
+            "Read(*.swo)",
+            "Read(*~)",
+            "Read(/compose-files/)",
+            "Read(/docker/)",
+            "Read(docker-compose.override.yml)",
+            "Read(docker-compose.*.yml)"
+        ]
+    }
+}
