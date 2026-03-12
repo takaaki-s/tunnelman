@@ -49,8 +49,9 @@ func setupTestDaemon(t *testing.T) (*daemon.Server, *daemon.Client) {
 
 	go srv.Start()
 
+	client := daemon.NewClient(sock)
 	for i := 0; i < 50; i++ {
-		if _, err := os.Stat(sock); err == nil {
+		if client.IsRunning() {
 			break
 		}
 		time.Sleep(20 * time.Millisecond)

@@ -48,7 +48,8 @@ func NewProcessManager(cmdr Commander) *ProcessManager {
 	}
 }
 
-// SetOnExit sets a callback invoked when a tunnel process exits.
+// SetOnExit sets a callback invoked (asynchronously) when a tunnel process exits.
+// The callback is called in a new goroutine and must not assume any lock ordering.
 func (pm *ProcessManager) SetOnExit(fn func(tunnelID string)) {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
@@ -145,11 +146,14 @@ func (pm *ProcessManager) waitProcess(tunnelID string, cmd *exec.Cmd) {
 	_ = cmd.Wait()
 
 	pm.mu.Lock()
+	// Idempotent: Disconnect may have already removed this entry.
 	delete(pm.processes, tunnelID)
 	onExit := pm.onExit
 	pm.mu.Unlock()
 
 	if onExit != nil {
-		onExit(tunnelID)
+		// Call asynchronously to avoid lock-ordering deadlocks
+		// (e.g., onExit acquiring Server.mu while pm.mu is not held).
+		go onExit(tunnelID)
 	}
 }

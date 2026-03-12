@@ -80,8 +80,8 @@ func (sm *StateManager) Load() error {
 
 // Save writes the state to disk using atomic write.
 func (sm *StateManager) Save() error {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
 
 	data, err := json.MarshalIndent(sm.state, "", "  ")
 	if err != nil {
@@ -121,13 +121,13 @@ func (sm *StateManager) GetTunnel(id string) *TunnelState {
 	return sm.state.Tunnels[id]
 }
 
-// GetAllTunnels returns a copy of all tunnel states.
-func (sm *StateManager) GetAllTunnels() map[string]*TunnelState {
+// GetAllTunnels returns a deep copy of all tunnel states.
+func (sm *StateManager) GetAllTunnels() map[string]TunnelState {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
-	result := make(map[string]*TunnelState, len(sm.state.Tunnels))
+	result := make(map[string]TunnelState, len(sm.state.Tunnels))
 	for k, v := range sm.state.Tunnels {
-		result[k] = v
+		result[k] = *v
 	}
 	return result
 }

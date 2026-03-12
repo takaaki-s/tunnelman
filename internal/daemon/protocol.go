@@ -115,10 +115,10 @@ type ListResponse struct {
 
 // DaemonStatusResponse returns daemon-level information.
 type DaemonStatusResponse struct {
-	PID       int    `json:"pid"`
-	Uptime    string `json:"uptime"`
-	Tunnels   int    `json:"tunnels"`
-	Running   int    `json:"running"`
+	PID        int    `json:"pid"`
+	Uptime     string `json:"uptime"`
+	Tunnels    int    `json:"tunnels"`
+	Running    int    `json:"running"`
 	ConfigPath string `json:"config_path"`
 }
 

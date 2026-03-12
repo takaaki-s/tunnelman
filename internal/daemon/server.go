@@ -192,7 +192,7 @@ func (s *Server) handleRemove(data json.RawMessage) Response {
 		return Response{Success: false, Error: fmt.Sprintf("tunnel %s not found", rr.ID)}
 	}
 
-	// Stop if running
+	// Disconnect can be called under s.mu because onExit is asynchronous (go onExit()).
 	if s.processManager.IsRunning(rr.ID) {
 		_ = s.processManager.Disconnect(rr.ID)
 		s.state.RemoveTunnel(rr.ID)
@@ -271,14 +271,15 @@ func (s *Server) handleStart(data json.RawMessage) Response {
 	}
 
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	idx := s.findTunnelIndex(sr.ID)
 	if idx < 0 {
+		s.mu.Unlock()
 		return Response{Success: false, Error: fmt.Sprintf("tunnel %s not found", sr.ID)}
 	}
-
 	tun := configToTunnel(s.config.Tunnels[idx])
+	s.mu.Unlock()
+
+	// Connect outside s.mu to avoid lock-ordering issues with ProcessManager/onExit.
 	info, err := s.processManager.Connect(tun)
 	if err != nil {
 		return Response{Success: false, Error: err.Error()}
@@ -300,13 +301,11 @@ func (s *Server) handleStop(data json.RawMessage) Response {
 		return Response{Success: false, Error: fmt.Sprintf("invalid request: %v", err)}
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	if !s.processManager.IsRunning(sr.ID) {
 		return Response{Success: false, Error: fmt.Sprintf("tunnel %s is not running", sr.ID)}
 	}
 
+	// Disconnect outside s.mu to avoid lock-ordering issues with ProcessManager/onExit.
 	if err := s.processManager.Disconnect(sr.ID); err != nil {
 		return Response{Success: false, Error: err.Error()}
 	}
@@ -318,21 +317,25 @@ func (s *Server) handleStop(data json.RawMessage) Response {
 }
 
 func (s *Server) handleStartAll() Response {
+	// Collect tunnels to start under lock, then connect outside lock.
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	started := 0
+	var toStart []*tunnel.Tunnel
 	for _, tc := range s.config.Tunnels {
 		if s.processManager.IsRunning(tc.ID) {
 			continue
 		}
-		tun := configToTunnel(tc)
+		toStart = append(toStart, configToTunnel(tc))
+	}
+	s.mu.Unlock()
+
+	started := 0
+	for _, tun := range toStart {
 		info, err := s.processManager.Connect(tun)
 		if err != nil {
-			slog.Warn("failed to start tunnel", "id", tc.ID, "error", err)
+			slog.Warn("failed to start tunnel", "id", tun.ID, "error", err)
 			continue
 		}
-		s.state.SetTunnel(tc.ID, &config.TunnelState{
+		s.state.SetTunnel(tun.ID, &config.TunnelState{
 			PID:       info.PID,
 			StartedAt: info.StartedAt,
 			Status:    "running",
@@ -346,16 +349,20 @@ func (s *Server) handleStartAll() Response {
 }
 
 func (s *Server) handleStopAll() Response {
+	// Collect IDs to stop under lock, then disconnect outside lock.
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	var toStop []string
+	for _, tc := range s.config.Tunnels {
+		if s.processManager.IsRunning(tc.ID) {
+			toStop = append(toStop, tc.ID)
+		}
+	}
+	s.mu.Unlock()
 
 	stopped := 0
-	for _, tc := range s.config.Tunnels {
-		if !s.processManager.IsRunning(tc.ID) {
-			continue
-		}
-		if err := s.processManager.Disconnect(tc.ID); err == nil {
-			s.state.RemoveTunnel(tc.ID)
+	for _, id := range toStop {
+		if err := s.processManager.Disconnect(id); err == nil {
+			s.state.RemoveTunnel(id)
 			stopped++
 		}
 	}
