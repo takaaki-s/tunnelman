@@ -6,6 +6,8 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+	"github.com/takaaki-s/tunnelman/internal/config"
+	"github.com/takaaki-s/tunnelman/internal/daemon"
 )
 
 var (
@@ -56,4 +58,21 @@ func outputError(code int, msg string) {
 		fmt.Fprintf(os.Stderr, "Error: %s\n", msg)
 	}
 	os.Exit(code)
+}
+
+// newClient creates a daemon client with resolved socket path.
+func newClient() *daemon.Client {
+	sp := socketPath
+	if sp == "" {
+		sp = config.DefaultSocketPath()
+	}
+	return daemon.NewClient(sp)
+}
+
+// resolveConfigPath returns the config path, defaulting to XDG location.
+func resolveConfigPath() string {
+	if configPath != "" {
+		return configPath
+	}
+	return config.DefaultConfigPath()
 }

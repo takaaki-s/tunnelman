@@ -39,6 +39,11 @@ func NewServer(socketPath string, cfg *config.Config, configPath string, state *
 	}
 }
 
+// SetProcessManager replaces the process manager (for testing).
+func (s *Server) SetProcessManager(pm *ProcessManager) {
+	s.processManager = pm
+}
+
 // Start begins listening on the Unix socket.
 func (s *Server) Start() error {
 	os.Remove(s.socketPath)

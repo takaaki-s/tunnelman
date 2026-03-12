@@ -1,14 +1,18 @@
 package daemon
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/takaaki-s/tunnelman/internal/config"
 )
+
+var testServerCount atomic.Int64
 
 // fakeCommander returns long-running sleep processes for testing.
 type fakeCommander struct{}
@@ -19,8 +23,14 @@ func (fakeCommander) Command(name string, args ...string) *exec.Cmd {
 
 func setupTestServer(t *testing.T) (*Server, *Client) {
 	t.Helper()
-	dir := t.TempDir()
-	socketPath := filepath.Join(dir, "test.sock")
+	// Use a short temp dir to avoid exceeding macOS Unix socket path limit (104 bytes)
+	n := testServerCount.Add(1)
+	dir, err := os.MkdirTemp("", fmt.Sprintf("tm%d", n))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	socketPath := filepath.Join(dir, "s.sock")
 	configPath := filepath.Join(dir, "config.yaml")
 
 	cfg := config.DefaultConfig()
@@ -36,15 +46,29 @@ func setupTestServer(t *testing.T) (*Server, *Client) {
 	srv := NewServer(socketPath, cfg, configPath, sm)
 	srv.processManager = NewProcessManager(fakeCommander{})
 
-	go srv.Start()
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.Start() }()
 
-	// Wait for socket
-	for i := 0; i < 50; i++ {
-		if _, err := os.Stat(socketPath); err == nil {
-			break
+	// Wait for server to be reachable, with early failure detection
+	client := NewClient(socketPath)
+	deadline := time.After(10 * time.Second)
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+
+	ready := false
+	for !ready {
+		select {
+		case srvErr := <-errCh:
+			t.Fatalf("Server.Start() returned early: %v", srvErr)
+		case <-deadline:
+			t.Fatal("Server did not become reachable within 10 seconds")
+		case <-ticker.C:
+			if client.IsRunning() {
+				ready = true
+			}
 		}
-		time.Sleep(20 * time.Millisecond)
 	}
+
 	t.Cleanup(func() { srv.Stop() })
 
 	return srv, NewClient(socketPath)
@@ -177,18 +201,25 @@ func TestServerListTunnels(t *testing.T) {
 func TestServerListWithProfileFilter(t *testing.T) {
 	_, client := setupTestServer(t)
 
-	_ = client.Add(AddRequest{
+	err := client.Add(AddRequest{
 		ID: "t1", Name: "web", Type: "local",
 		SSHHost: "bastion", LocalHost: "127.0.0.1",
 		LocalPort: 8080, RemoteHost: "db", RemotePort: 5432,
 		Profile: "dev",
 	})
-	_ = client.Add(AddRequest{
+	if err != nil {
+		t.Fatalf("Add(t1) error = %v", err)
+	}
+
+	err = client.Add(AddRequest{
 		ID: "t2", Name: "api", Type: "local",
 		SSHHost: "bastion", LocalHost: "127.0.0.1",
 		LocalPort: 9090, RemoteHost: "api", RemotePort: 3000,
 		Profile: "prod",
 	})
+	if err != nil {
+		t.Fatalf("Add(t2) error = %v", err)
+	}
 
 	lr, err := client.List(ListRequest{Profile: "dev"})
 	if err != nil {
