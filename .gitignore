@@ -47,5 +47,4 @@ Thumbs.db
 debug
 __debug_bin*
 
-# Serena MCP server files (local development)
-.serena/
+.tasks
