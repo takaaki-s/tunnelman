@@ -1,13 +1,11 @@
-# Tunnelman - Simple Makefile
+# Tunnelman - Makefile
 
 BINARY_NAME=tunnelman
-MAIN_FILE=cmd/tunnelman/main.go
+MAIN_PKG=./cmd/tunnelman
 BUILD_DIR=build
 
-# Default target
 .DEFAULT_GOAL := help
 
-# help: Show this help message
 help:
 	@echo 'Usage:'
 	@echo '  make <target>'
@@ -16,30 +14,33 @@ help:
 	@echo '  build      Build the binary'
 	@echo '  run        Run the application'
 	@echo '  test       Run tests'
+	@echo '  lint       Run linter'
+	@echo '  fmt        Check formatting'
 	@echo '  clean      Remove binary and build artifacts'
 	@echo '  install    Install the binary to $$GOPATH/bin'
 
-# build: Build the binary
 build:
 	@mkdir -p $(BUILD_DIR)
-	go build -o $(BUILD_DIR)/$(BINARY_NAME) $(MAIN_FILE)
+	go build -o $(BUILD_DIR)/$(BINARY_NAME) $(MAIN_PKG)
 	@echo "Binary built: $(BUILD_DIR)/$(BINARY_NAME)"
 
-# run: Run the application
 run:
-	go run $(MAIN_FILE)
+	go run $(MAIN_PKG)
 
-# test: Run tests
 test:
-	go test -v ./...
+	go test -v -race ./...
 
-# clean: Remove binary and build artifacts
+lint:
+	golangci-lint run ./...
+
+fmt:
+	@test -z "$$(gofmt -l .)" || (gofmt -d . && exit 1)
+
 clean:
 	go clean
 	rm -rf $(BUILD_DIR)
 
-# install: Install the binary to $GOPATH/bin
 install:
-	go install ./cmd/tunnelman
+	go install $(MAIN_PKG)
 
-.PHONY: help build run test clean install
+.PHONY: help build run test lint fmt clean install
