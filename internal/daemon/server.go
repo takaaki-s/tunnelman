@@ -20,15 +20,19 @@ type Server struct {
 	configPath     string
 	state          *config.StateManager
 	processManager *ProcessManager
+	healthChecker  *HealthChecker
+	reconnector    *ReconnectManager
 	listener       net.Listener
 	done           chan struct{}
 	startedAt      time.Time
 	mu             sync.Mutex
+	// manualStop tracks tunnels stopped intentionally (not crashed).
+	manualStop map[string]bool
 }
 
 // NewServer creates a new daemon server.
 func NewServer(socketPath string, cfg *config.Config, configPath string, state *config.StateManager) *Server {
-	return &Server{
+	s := &Server{
 		socketPath:     socketPath,
 		config:         cfg,
 		configPath:     configPath,
@@ -36,7 +40,64 @@ func NewServer(socketPath string, cfg *config.Config, configPath string, state *
 		processManager: NewProcessManager(nil),
 		done:           make(chan struct{}),
 		startedAt:      time.Now(),
+		manualStop:     make(map[string]bool),
 	}
+
+	// Initialize health checker from config
+	if hc := cfg.HealthCheck; hc != nil && hc.Enabled {
+		s.healthChecker = NewHealthChecker(
+			time.Duration(hc.IntervalSeconds)*time.Second,
+			time.Duration(hc.TimeoutSeconds)*time.Second,
+			hc.MaxFailures,
+		)
+		// onUnhealthy updates state only. If the SSH process is still alive,
+		// reconnection is triggered later via processManager.onExit when the
+		// process eventually dies. This callback does NOT kill the process.
+		s.healthChecker.SetOnUnhealthy(func(tunnelID string) {
+			slog.Warn("tunnel health check failed", "tunnel", tunnelID)
+			var newState config.TunnelState
+			if existing := s.state.GetTunnel(tunnelID); existing != nil {
+				newState = *existing
+			}
+			newState.Status = "unhealthy"
+			s.state.SetTunnel(tunnelID, &newState)
+			if err := s.state.Save(); err != nil {
+				slog.Warn("failed to save state", "error", err)
+			}
+		})
+	}
+
+	// Initialize reconnect manager from config
+	if rc := cfg.Reconnect; rc != nil && rc.Enabled {
+		s.reconnector = NewReconnectManager(
+			rc.Strategy,
+			time.Duration(rc.InitialDelaySeconds)*time.Second,
+			time.Duration(rc.MaxDelaySeconds)*time.Second,
+			rc.MaxRetries,
+		)
+		s.reconnector.SetOnReconnect(func(tunnelID string) error {
+			return s.doReconnect(tunnelID)
+		})
+		s.reconnector.SetOnExhausted(func(tunnelID string) {
+			slog.Error("reconnect retries exhausted", "tunnel", tunnelID)
+			var newState config.TunnelState
+			if existing := s.state.GetTunnel(tunnelID); existing != nil {
+				newState = *existing
+			}
+			newState.Status = "error"
+			s.state.SetTunnel(tunnelID, &newState)
+			if err := s.state.Save(); err != nil {
+				slog.Warn("failed to save state", "error", err)
+			}
+		})
+	}
+
+	// Set process exit callback for reconnection
+	s.processManager.SetOnExit(func(tunnelID string) {
+		s.handleProcessExit(tunnelID)
+	})
+
+	return s
 }
 
 // SetProcessManager replaces the process manager (for testing).
@@ -85,6 +146,12 @@ func (s *Server) Stop() {
 
 	if ln != nil {
 		ln.Close()
+	}
+	if s.healthChecker != nil {
+		s.healthChecker.StopAll()
+	}
+	if s.reconnector != nil {
+		s.reconnector.CancelAll()
 	}
 	s.processManager.StopAll()
 	os.Remove(s.socketPath)
@@ -192,11 +259,23 @@ func (s *Server) handleRemove(data json.RawMessage) Response {
 		return Response{Success: false, Error: fmt.Sprintf("tunnel %s not found", rr.ID)}
 	}
 
+	// Mark as manual stop to prevent reconnection
+	s.manualStop[rr.ID] = true
+
+	if s.healthChecker != nil {
+		s.healthChecker.Stop(rr.ID)
+	}
+	if s.reconnector != nil {
+		s.reconnector.Cancel(rr.ID)
+	}
+
 	// Disconnect can be called under s.mu because onExit is asynchronous (go onExit()).
 	if s.processManager.IsRunning(rr.ID) {
 		_ = s.processManager.Disconnect(rr.ID)
 		s.state.RemoveTunnel(rr.ID)
-		_ = s.state.Save()
+		if err := s.state.Save(); err != nil {
+			slog.Warn("failed to save state", "error", err)
+		}
 	}
 
 	s.config.Tunnels = append(s.config.Tunnels[:idx], s.config.Tunnels[idx+1:]...)
@@ -277,6 +356,7 @@ func (s *Server) handleStart(data json.RawMessage) Response {
 		return Response{Success: false, Error: fmt.Sprintf("tunnel %s not found", sr.ID)}
 	}
 	tun := configToTunnel(s.config.Tunnels[idx])
+	delete(s.manualStop, sr.ID)
 	s.mu.Unlock()
 
 	// Connect outside s.mu to avoid lock-ordering issues with ProcessManager/onExit.
@@ -290,7 +370,13 @@ func (s *Server) handleStart(data json.RawMessage) Response {
 		StartedAt: info.StartedAt,
 		Status:    "running",
 	})
-	_ = s.state.Save()
+	if err := s.state.Save(); err != nil {
+		slog.Warn("failed to save state", "error", err)
+	}
+
+	if s.healthChecker != nil {
+		s.healthChecker.Start(sr.ID, tun.LocalHost, tun.LocalPort)
+	}
 
 	return Response{Success: true}
 }
@@ -305,13 +391,27 @@ func (s *Server) handleStop(data json.RawMessage) Response {
 		return Response{Success: false, Error: fmt.Sprintf("tunnel %s is not running", sr.ID)}
 	}
 
+	// Mark as manual stop to prevent reconnection
+	s.mu.Lock()
+	s.manualStop[sr.ID] = true
+	s.mu.Unlock()
+
+	if s.healthChecker != nil {
+		s.healthChecker.Stop(sr.ID)
+	}
+	if s.reconnector != nil {
+		s.reconnector.Cancel(sr.ID)
+	}
+
 	// Disconnect outside s.mu to avoid lock-ordering issues with ProcessManager/onExit.
 	if err := s.processManager.Disconnect(sr.ID); err != nil {
 		return Response{Success: false, Error: err.Error()}
 	}
 
 	s.state.RemoveTunnel(sr.ID)
-	_ = s.state.Save()
+	if err := s.state.Save(); err != nil {
+		slog.Warn("failed to save state", "error", err)
+	}
 
 	return Response{Success: true}
 }
@@ -330,6 +430,10 @@ func (s *Server) handleStartAll() Response {
 
 	started := 0
 	for _, tun := range toStart {
+		s.mu.Lock()
+		delete(s.manualStop, tun.ID)
+		s.mu.Unlock()
+
 		info, err := s.processManager.Connect(tun)
 		if err != nil {
 			slog.Warn("failed to start tunnel", "id", tun.ID, "error", err)
@@ -340,9 +444,14 @@ func (s *Server) handleStartAll() Response {
 			StartedAt: info.StartedAt,
 			Status:    "running",
 		})
+		if s.healthChecker != nil {
+			s.healthChecker.Start(tun.ID, tun.LocalHost, tun.LocalPort)
+		}
 		started++
 	}
-	_ = s.state.Save()
+	if err := s.state.Save(); err != nil {
+		slog.Warn("failed to save state", "error", err)
+	}
 
 	respData, _ := json.Marshal(map[string]int{"started": started})
 	return Response{Success: true, Data: respData}
@@ -361,12 +470,25 @@ func (s *Server) handleStopAll() Response {
 
 	stopped := 0
 	for _, id := range toStop {
+		s.mu.Lock()
+		s.manualStop[id] = true
+		s.mu.Unlock()
+
+		if s.healthChecker != nil {
+			s.healthChecker.Stop(id)
+		}
+		if s.reconnector != nil {
+			s.reconnector.Cancel(id)
+		}
+
 		if err := s.processManager.Disconnect(id); err == nil {
 			s.state.RemoveTunnel(id)
 			stopped++
 		}
 	}
-	_ = s.state.Save()
+	if err := s.state.Save(); err != nil {
+		slog.Warn("failed to save state", "error", err)
+	}
 
 	respData, _ := json.Marshal(map[string]int{"stopped": stopped})
 	return Response{Success: true, Data: respData}
@@ -409,7 +531,7 @@ func (s *Server) handleList(data json.RawMessage) Response {
 			LocalPort: tc.LocalPort, RemoteHost: tc.RemoteHost,
 			RemotePort: tc.RemotePort, Profile: tc.Profile,
 			AutoConnect: tc.AutoConnect,
-			Status: status, PID: pid,
+			Status:      status, PID: pid,
 			ReconnectCount: reconnectCount,
 		})
 	}
@@ -450,7 +572,7 @@ func (s *Server) handleStatus(data json.RawMessage) Response {
 		LocalPort: tc.LocalPort, RemoteHost: tc.RemoteHost,
 		RemotePort: tc.RemotePort, Profile: tc.Profile,
 		AutoConnect: tc.AutoConnect,
-		Status: status, PID: pid,
+		Status:      status, PID: pid,
 	}
 
 	respData, _ := json.Marshal(info)
@@ -590,6 +712,91 @@ func (s *Server) saveConfig() error {
 		return nil
 	}
 	return config.SaveConfig(s.configPath, s.config)
+}
+
+// handleProcessExit is called asynchronously when an SSH process exits.
+func (s *Server) handleProcessExit(tunnelID string) {
+	s.mu.Lock()
+	manual := s.manualStop[tunnelID]
+	delete(s.manualStop, tunnelID)
+	s.mu.Unlock()
+
+	if s.healthChecker != nil {
+		s.healthChecker.Stop(tunnelID)
+	}
+
+	if manual {
+		// Manual stop: no reconnection
+		return
+	}
+
+	slog.Warn("tunnel process exited unexpectedly", "tunnel", tunnelID)
+
+	if s.reconnector != nil {
+		// Update state to reconnecting (copy to avoid data race on internal pointer).
+		// ReconnectCount tracks the number of crash→recovery cycles for this tunnel.
+		if ts := s.state.GetTunnel(tunnelID); ts != nil {
+			copied := *ts
+			copied.Status = "reconnecting"
+			copied.ReconnectCount++
+			s.state.SetTunnel(tunnelID, &copied)
+		} else {
+			s.state.SetTunnel(tunnelID, &config.TunnelState{
+				Status:         "reconnecting",
+				ReconnectCount: 1,
+			})
+		}
+		if err := s.state.Save(); err != nil {
+			slog.Warn("failed to save state", "error", err)
+		}
+		s.reconnector.Schedule(tunnelID)
+	} else {
+		// No reconnector: mark as stopped
+		s.state.RemoveTunnel(tunnelID)
+		if err := s.state.Save(); err != nil {
+			slog.Warn("failed to save state", "error", err)
+		}
+	}
+}
+
+// doReconnect performs a single reconnection attempt for the given tunnel.
+func (s *Server) doReconnect(tunnelID string) error {
+	s.mu.Lock()
+	idx := s.findTunnelIndex(tunnelID)
+	if idx < 0 {
+		s.mu.Unlock()
+		return nil // tunnel removed, treat as success to stop retrying
+	}
+	tun := configToTunnel(s.config.Tunnels[idx])
+	s.mu.Unlock()
+
+	info, err := s.processManager.Connect(tun)
+	if err != nil {
+		slog.Warn("reconnect attempt failed", "tunnel", tunnelID, "error", err)
+		return errReconnectFailed
+	}
+
+	// Preserve ReconnectCount from previous state
+	var reconnectCount int
+	if existing := s.state.GetTunnel(tunnelID); existing != nil {
+		reconnectCount = existing.ReconnectCount
+	}
+	s.state.SetTunnel(tunnelID, &config.TunnelState{
+		PID:            info.PID,
+		StartedAt:      info.StartedAt,
+		Status:         "running",
+		ReconnectCount: reconnectCount,
+	})
+	if err := s.state.Save(); err != nil {
+		slog.Warn("failed to save state", "error", err)
+	}
+
+	if s.healthChecker != nil {
+		s.healthChecker.Start(tunnelID, tun.LocalHost, tun.LocalPort)
+	}
+
+	slog.Info("tunnel reconnected", "tunnel", tunnelID)
+	return nil
 }
 
 func configToTunnel(tc config.TunnelConfig) *tunnel.Tunnel {

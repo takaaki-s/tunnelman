@@ -45,6 +45,10 @@ func setupTestServer(t *testing.T) (*Server, *Client) {
 
 	srv := NewServer(socketPath, cfg, configPath, sm)
 	srv.processManager = NewProcessManager(fakeCommander{})
+	// Re-register onExit callback since replacing processManager loses it.
+	srv.processManager.SetOnExit(func(tunnelID string) {
+		srv.handleProcessExit(tunnelID)
+	})
 
 	errCh := make(chan error, 1)
 	go func() { errCh <- srv.Start() }()
@@ -341,6 +345,75 @@ func TestServerProfileRemove(t *testing.T) {
 	}
 	if len(pl.Profiles) != 0 {
 		t.Errorf("ProfileList() after remove = %d, want 0", len(pl.Profiles))
+	}
+}
+
+func TestReconnectManualStopNoReconnect(t *testing.T) {
+	srv, client := setupTestServer(t)
+	addTestTunnel(t, client, "t1", "web")
+
+	// Replace reconnector for testing. This works because NewServer's onExit
+	// closure captures `s` (the Server pointer), so it sees the replaced reconnector.
+	srv.reconnector = NewReconnectManager("fixed", 50*time.Millisecond, 1*time.Second, 5)
+	var reconnected atomic.Int32
+	srv.reconnector.SetOnReconnect(func(tunnelID string) error {
+		reconnected.Add(1)
+		return nil
+	})
+
+	// Start the tunnel
+	if err := client.Start("t1"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Manually stop the tunnel (should set manualStop flag)
+	if err := client.Stop("t1"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Wait to see if reconnect fires (it should NOT)
+	time.Sleep(200 * time.Millisecond)
+
+	if reconnected.Load() != 0 {
+		t.Errorf("expected 0 reconnect attempts after manual stop, got %d", reconnected.Load())
+	}
+}
+
+func TestReconnectAfterManualStopAndRestart(t *testing.T) {
+	srv, client := setupTestServer(t)
+	addTestTunnel(t, client, "t1", "web")
+
+	// Replace reconnector for testing (see TestReconnectManualStopNoReconnect comment).
+	srv.reconnector = NewReconnectManager("fixed", 50*time.Millisecond, 1*time.Second, 5)
+	var reconnected atomic.Int32
+	srv.reconnector.SetOnReconnect(func(tunnelID string) error {
+		reconnected.Add(1)
+		return nil
+	})
+
+	// Start → Stop (sets manualStop) → Start again (clears manualStop)
+	if err := client.Start("t1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Stop("t1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Start("t1"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate crash: kill the process directly (bypass manualStop)
+	pi := srv.processManager.GetProcessInfo("t1")
+	if pi == nil {
+		t.Fatal("process not found for t1")
+	}
+	pi.Cmd.Process.Kill()
+
+	// Wait for reconnect to fire (it SHOULD because manualStop was cleared by Start)
+	time.Sleep(300 * time.Millisecond)
+
+	if reconnected.Load() < 1 {
+		t.Errorf("expected reconnect after stop→start→crash, got %d attempts", reconnected.Load())
 	}
 }
 
