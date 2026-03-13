@@ -53,26 +53,16 @@ func setupTestServer(t *testing.T) (*Server, *Client) {
 	errCh := make(chan error, 1)
 	go func() { errCh <- srv.Start() }()
 
-	// Wait for server to be reachable, with early failure detection
+	// Check for early Start() failure before polling
 	client := NewClient(socketPath)
-	deadline := time.After(10 * time.Second)
-	ticker := time.NewTicker(20 * time.Millisecond)
-	defer ticker.Stop()
-
-	ready := false
-	for !ready {
-		select {
-		case srvErr := <-errCh:
-			t.Fatalf("Server.Start() returned early: %v", srvErr)
-		case <-deadline:
-			t.Fatal("Server did not become reachable within 10 seconds")
-		case <-ticker.C:
-			if client.IsRunning() {
-				ready = true
-			}
-		}
+	select {
+	case srvErr := <-errCh:
+		t.Fatalf("Server.Start() returned early: %v", srvErr)
+	case <-time.After(50 * time.Millisecond):
+		// Server is starting, proceed to wait
 	}
 
+	waitForServer(t, client)
 	t.Cleanup(func() { srv.Stop() })
 
 	return srv, NewClient(socketPath)

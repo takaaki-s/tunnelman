@@ -151,6 +151,8 @@ func (hc *HealthChecker) doCheck(tunnelID string) {
 			hs.healthy = false
 			if hc.onUnhealthy != nil {
 				fn := hc.onUnhealthy
+				// Run in a new goroutine to avoid blocking the health check ticker
+				// while the callback (which may acquire Server.mu) executes.
 				go fn(tunnelID)
 			}
 		}

@@ -387,14 +387,20 @@ func (s *Server) handleStop(data json.RawMessage) Response {
 		return Response{Success: false, Error: fmt.Sprintf("invalid request: %v", err)}
 	}
 
-	if !s.processManager.IsRunning(sr.ID) {
-		return Response{Success: false, Error: fmt.Sprintf("tunnel %s is not running", sr.ID)}
-	}
-
-	// Mark as manual stop to prevent reconnection
+	// Set manualStop before checking IsRunning to prevent a race where
+	// the process exits between the IsRunning check and manualStop write,
+	// which would cause handleProcessExit to trigger an unwanted reconnect.
 	s.mu.Lock()
 	s.manualStop[sr.ID] = true
 	s.mu.Unlock()
+
+	if !s.processManager.IsRunning(sr.ID) {
+		// Process already exited; revert manualStop since we didn't actually stop it.
+		s.mu.Lock()
+		delete(s.manualStop, sr.ID)
+		s.mu.Unlock()
+		return Response{Success: false, Error: fmt.Sprintf("tunnel %s is not running", sr.ID)}
+	}
 
 	if s.healthChecker != nil {
 		s.healthChecker.Stop(sr.ID)

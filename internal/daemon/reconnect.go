@@ -45,6 +45,7 @@ func NewReconnectManager(strategy string, initialDelay, maxDelay time.Duration, 
 }
 
 // SetOnReconnect sets the callback that performs the actual reconnection.
+// Must be called before Schedule. Changes take effect from the next retry attempt.
 // Return nil on success, errReconnectFailed (or any error) on failure.
 func (rm *ReconnectManager) SetOnReconnect(fn func(tunnelID string) error) {
 	rm.mu.Lock()
@@ -53,6 +54,7 @@ func (rm *ReconnectManager) SetOnReconnect(fn func(tunnelID string) error) {
 }
 
 // SetOnExhausted sets a callback invoked when max retries are exhausted.
+// Must be called before Schedule. Changes take effect from the next retry attempt.
 func (rm *ReconnectManager) SetOnExhausted(fn func(tunnelID string)) {
 	rm.mu.Lock()
 	defer rm.mu.Unlock()

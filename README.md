@@ -1,312 +1,194 @@
 # Tunnelman
 
-A powerful SSH tunnel manager with a Terminal User Interface (TUI) for easy management of SSH port forwarding connections.
+A CLI tool for managing SSH tunnels through a background daemon process.
 
 ## Features
 
-- **Interactive TUI**: Manage SSH tunnels with an intuitive terminal interface built with tview
-- **Multiple tunnel types**: Support for Local (-L), Remote (-R), and Dynamic/SOCKS (-D) forwarding
+- **Daemon architecture**: Background daemon manages tunnels independently of your shell session
+- **Multiple tunnel types**: Local (-L), Remote (-R), and Dynamic/SOCKS (-D) forwarding
 - **Profile management**: Organize tunnels into profiles for different environments
-- **SSH Config Import**: Import tunnel configurations directly from ~/.ssh/config
-- **Auto-connect**: Configure tunnels to start automatically on launch
-- **Persistent connections**: Tunnels remain running even after closing the UI
-- **Real-time status**: Monitor tunnel states with color-coded indicators
-- **Search and filter**: Quickly find tunnels with search functionality
-- **Cross-platform**: Works on Linux, macOS, and Windows
+- **SSH config import**: Import tunnel configurations from ~/.ssh/config
+- **Health checking**: TCP-based health checks detect unhealthy tunnels
+- **Auto-reconnect**: Automatic reconnection with exponential or fixed backoff
+- **JSON output**: Machine-readable output for scripting with `--json`
 - **XDG compliant**: Follows XDG Base Directory Specification for file storage
-- **SSH config integration**: Uses system SSH configuration (~/.ssh/config) for authentication
 
 ## Installation
-
-### From source
 
 ```bash
 go install github.com/takaaki-s/tunnelman/cmd/tunnelman@latest
 ```
 
-### Build locally
+### Build from source
 
 ```bash
 git clone https://github.com/takaaki-s/tunnelman.git
 cd tunnelman
 make build
-# Or manually:
-# go build -o build/tunnelman cmd/tunnelman/main.go
 ```
 
-## Usage
-
-### Basic usage
+## Quick Start
 
 ```bash
-# Start the TUI
-tunnelman
+# Start the daemon
+tunnelman daemon start
 
-# Start with a specific profile
-tunnelman --profile development
+# Add a tunnel
+tunnelman add --id db --name "Database" --type local \
+  --ssh-host bastion --local-port 5432 --remote-host db.internal --remote-port 5432
 
-# Auto-connect tunnels on startup and exit (headless mode)
-tunnelman -auto
+# Start the tunnel
+tunnelman start db
 
-# Auto-connect specific profile tunnels on startup and exit
-tunnelman -auto --profile production
+# Check status
+tunnelman status db
 
-# List available profiles
-tunnelman --list-profiles
+# List all tunnels
+tunnelman list
 
-# Enable debug mode for verbose logging
-tunnelman --debug
+# Stop and remove
+tunnelman stop db
+tunnelman rm db
 
-# Show version
-tunnelman --version
+# Stop the daemon
+tunnelman daemon stop
 ```
 
-### Keyboard shortcuts
+## Commands
 
-#### Navigation
-- `↑`/`k` - Move up
-- `↓`/`j` - Move down
-- `Tab` - Switch focus between panels
-- `/` - Search tunnels
-- `Esc` - Cancel search/Close dialog
+### Daemon management
 
-#### Tunnel Operations
-- `Enter` - Start/Stop selected tunnel
-- `u` - Start selected tunnel
-- `d` - Stop selected tunnel
-- `c` - Create new tunnel
-- `e` - Edit selected tunnel
-- `r` - Remove (delete) selected tunnel
-- `a` - Toggle auto-connect for selected tunnel
-- `f` - Toggle forward/reverse mode (Local ↔ Remote)
+```bash
+tunnelman daemon start     # Start the daemon (background)
+tunnelman daemon stop      # Stop the daemon
+tunnelman daemon status    # Show daemon status
+```
 
-#### Batch Operations
-- `A` - Start all tunnels in current profile
-- `X` - Stop all tunnels in current profile
+### Tunnel operations
 
-#### Profile Management
-- `g` - Switch profile
-- `p` - Manage profiles (create/delete)
-- `i` - Import tunnels from SSH config
+```bash
+tunnelman add [flags]      # Add a new tunnel
+tunnelman rm <id>          # Remove a tunnel
+tunnelman edit <id>        # Edit a tunnel
+tunnelman start <id>       # Start a tunnel (or --all)
+tunnelman stop <id>        # Stop a tunnel (or --all)
+tunnelman list             # List tunnels
+tunnelman status <id>      # Show tunnel status
+```
 
-#### Application
-- `?` - Show help
-- `q` - Quit (tunnels keep running)
-- `Ctrl+C` - Force quit
+### Profile management
+
+```bash
+tunnelman profile list                       # List profiles
+tunnelman profile create <name> [--description ..]  # Create a profile
+tunnelman profile rm <name>                  # Remove a profile
+```
+
+### SSH config import
+
+```bash
+tunnelman import --host <ssh-alias>          # Import forwards from SSH config
+```
+
+### Global flags
+
+```
+--json            Output in JSON format
+--config <path>   Path to config file
+--socket <path>   Path to daemon socket
+```
 
 ## Configuration
 
-Configuration files are stored according to the XDG Base Directory Specification:
+Configuration is stored in YAML format:
 
-- **Linux/macOS**: `~/.config/tunnelman/config.json`
-- **Windows**: `%APPDATA%\tunnelman\config.json`
+- **Linux/macOS**: `~/.config/tunnelman/config.yaml`
+- **Windows**: `%APPDATA%\tunnelman\config.yaml`
 
-### Example configuration
+### Example
 
-```json
-{
-  "version": "1.0",
-  "tunnels": [
-    {
-      "id": "db-tunnel",
-      "name": "Database Tunnel",
-      "type": "local",
-      "ssh_host": "bastion.example.com",
-      "local_host": "127.0.0.1",
-      "local_port": 5432,
-      "remote_host": "localhost",
-      "remote_port": 5432,
-      "profile": "development",
-      "auto_connect": false
-    },
-    {
-      "id": "web-tunnel",
-      "name": "Web Server",
-      "type": "local",
-      "ssh_host": "web.example.com",
-      "local_host": "127.0.0.1",
-      "local_port": 8080,
-      "remote_host": "localhost",
-      "remote_port": 80,
-      "profile": "production",
-      "auto_connect": true
-    },
-    {
-      "id": "socks-proxy",
-      "name": "SOCKS Proxy",
-      "type": "dynamic",
-      "ssh_host": "proxy.example.com",
-      "local_host": "127.0.0.1",
-      "local_port": 1080,
-      "profile": "default",
-      "auto_connect": false
-    }
-  ],
-  "profiles": [
-    {
-      "name": "default",
-      "description": "Default profile"
-    },
-    {
-      "name": "development",
-      "description": "Development environment"
-    },
-    {
-      "name": "production",
-      "description": "Production environment"
-    }
-  ]
-}
+```yaml
+version: "2"
+tunnels:
+  - id: db-tunnel
+    name: Database Tunnel
+    type: local
+    ssh_host: bastion.example.com
+    local_host: 127.0.0.1
+    local_port: 5432
+    remote_host: localhost
+    remote_port: 5432
+    profile: development
+    auto_connect: false
+  - id: socks-proxy
+    name: SOCKS Proxy
+    type: dynamic
+    ssh_host: proxy.example.com
+    local_host: 127.0.0.1
+    local_port: 1080
+profiles:
+  - name: development
+    description: Development environment
+health_check:
+  enabled: true
+  interval_seconds: 30
+  timeout_seconds: 5
+  max_failures: 3
+reconnect:
+  enabled: true
+  strategy: exponential
+  initial_delay_seconds: 1
+  max_delay_seconds: 300
+  max_retries: 10
 ```
-
-**Note**: SSH authentication is handled by your system's SSH configuration (`~/.ssh/config`). Configure your SSH hosts, users, ports, and keys there.
 
 ## Tunnel Types
 
 ### Local Forward (-L)
+
 Forwards a local port to a remote destination through the SSH server.
+
 ```
-Local:8080 → SSH Server → Remote:80
+Local:5432 → SSH Server → Remote DB:5432
 ```
-Use case: Access remote services as if they were local (e.g., databases, web servers)
 
 ### Remote Forward (-R)
+
 Forwards a remote port on the SSH server to a local destination.
+
 ```
 Remote:8080 → SSH Server → Local:3000
 ```
-Use case: Expose local services to remote servers (e.g., webhooks, development servers)
-
-**Note**: For external access, the SSH server must have `GatewayPorts` enabled in sshd_config
 
 ### Dynamic/SOCKS (-D)
+
 Creates a SOCKS proxy on the local port.
+
 ```
 Local:1080 → SOCKS Proxy → Any destination
 ```
-Use case: Route traffic through SSH server as a proxy
-
-## State Management
-
-Running tunnel PIDs are stored in:
-- **Linux/macOS**: `~/.local/state/tunnelman/pids.json`
-- **Windows**: `%LocalAppData%\tunnelman\pids.json`
-
-This allows Tunnelman to:
-- Recover tunnel states after restart
-- Clean up orphaned processes
-- Keep tunnels running after UI exit
-
-## SSH Configuration
-
-Tunnelman relies on your system's SSH configuration for authentication. Configure your SSH settings in `~/.ssh/config`:
-
-```ssh
-Host bastion.example.com
-    User myusername
-    Port 22
-    IdentityFile ~/.ssh/id_rsa
-
-Host *.internal.example.com
-    ProxyJump bastion.example.com
-    User admin
-```
-
-### Importing from SSH Config
-
-You can import tunnel configurations from your SSH config file:
-
-1. Press `i` in the TUI to open the import dialog
-2. Select the SSH host to import from
-3. Choose or create a target profile
-4. Tunnelman will automatically parse and import LocalForward, RemoteForward, and DynamicForward settings
-
-Example SSH config with port forwarding:
-```ssh
-Host dev-server
-    HostName dev.example.com
-    User developer
-    LocalForward 5432 localhost:5432
-    LocalForward 8080 localhost:80
-    RemoteForward 9000 localhost:3000
-    DynamicForward 1080
-```
-
-This approach provides:
-- Centralized SSH configuration
-- Support for ProxyJump/ProxyCommand
-- SSH agent integration
-- Custom SSH options per host
-- Easy migration from existing SSH setups
 
 ## Development
 
 ### Requirements
-- Go 1.20 or later
+
+- Go 1.21 or later
 - SSH client installed
 
-### Building from source
+### Build and test
+
 ```bash
-# Clone the repository
-git clone https://github.com/takaaki-s/tunnelman.git
-cd tunnelman
-
-# Build
-make build
-
-# Run tests
-make test
-
-# Install to $GOPATH/bin
-make install
-
-# Clean build artifacts
-make clean
+make build    # Build the binary
+make test     # Run tests (with -race)
+make lint     # Run linter
+make fmt      # Check formatting
+make clean    # Remove build artifacts
 ```
-
-## Troubleshooting
-
-### Tunnels not starting
-- Check SSH connectivity: `ssh <host>` should work without password prompts
-- Verify port availability: ensure local ports are not already in use
-- Check logs with `--debug` flag for detailed error messages
-- For Remote Forward, ensure SSH server has appropriate GatewayPorts setting
-
-### Configuration not saving
-- Verify write permissions for config directory
-- Check disk space availability
-- Run with `--debug` to see file operation errors
-
-### Profile management issues
-- Default profile cannot be deleted
-- Profiles must have unique names
-- Switching profiles only shows tunnels in that profile
-
-### SSH Config import issues
-- Ensure SSH config file has correct syntax
-- Complex configurations may need manual adjustment
-- Port forwarding directives must follow SSH config format
 
 ## License
 
 MIT License - see LICENSE file for details
 
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-### Development Guidelines
-1. Follow Go best practices and conventions
-2. Add tests for new features
-3. Update documentation as needed
-4. Ensure all tests pass before submitting PR
-
 ## Author
 
 Takaaki Sato
-
-## Acknowledgments
-
-Built with:
-- [tview](https://github.com/rivo/tview) - Terminal UI library
-- [tcell](https://github.com/gdamore/tcell) - Terminal handling library
