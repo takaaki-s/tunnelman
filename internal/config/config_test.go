@@ -10,8 +10,7 @@ func TestLoadConfig(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 
-	yaml := `version: "2"
-profiles:
+	yaml := `profiles:
   - name: dev
     description: Development tunnels
 tunnels:
@@ -46,9 +45,6 @@ reconnect:
 		t.Fatalf("LoadConfig() error = %v", err)
 	}
 
-	if cfg.Version != "2" {
-		t.Errorf("Version = %q, want %q", cfg.Version, "2")
-	}
 	if len(cfg.Profiles) != 1 || cfg.Profiles[0].Name != "dev" {
 		t.Errorf("Profiles = %+v, want 1 profile named dev", cfg.Profiles)
 	}
@@ -77,9 +73,6 @@ func TestLoadConfigDefaults(t *testing.T) {
 	cfg, err := LoadConfig(path)
 	if err != nil {
 		t.Fatalf("LoadConfig() error = %v", err)
-	}
-	if cfg.Version != "2" {
-		t.Errorf("Version = %q, want %q", cfg.Version, "2")
 	}
 	if len(cfg.Tunnels) != 0 {
 		t.Errorf("Tunnels count = %d, want 0", len(cfg.Tunnels))
@@ -123,9 +116,6 @@ func TestSaveConfigRoundTrip(t *testing.T) {
 		t.Fatalf("LoadConfig() error = %v", err)
 	}
 
-	if loaded.Version != original.Version {
-		t.Errorf("Version = %q, want %q", loaded.Version, original.Version)
-	}
 	if len(loaded.Tunnels) != 1 {
 		t.Fatalf("Tunnels count = %d, want 1", len(loaded.Tunnels))
 	}
@@ -146,7 +136,6 @@ func TestConfigValidate(t *testing.T) {
 		{
 			name: "valid config",
 			cfg: Config{
-				Version: "2",
 				Tunnels: []TunnelConfig{
 					{ID: "t1", Name: "a", Type: "local", SSHHost: "h", LocalPort: 8080, RemotePort: 80},
 					{ID: "t2", Name: "b", Type: "local", SSHHost: "h", LocalPort: 9090, RemotePort: 80},
@@ -156,7 +145,6 @@ func TestConfigValidate(t *testing.T) {
 		{
 			name: "duplicate tunnel ID",
 			cfg: Config{
-				Version: "2",
 				Tunnels: []TunnelConfig{
 					{ID: "t1", Name: "a", Type: "local", SSHHost: "h", LocalPort: 8080, RemotePort: 80},
 					{ID: "t1", Name: "b", Type: "local", SSHHost: "h", LocalPort: 9090, RemotePort: 80},
@@ -167,7 +155,6 @@ func TestConfigValidate(t *testing.T) {
 		{
 			name: "invalid tunnel port",
 			cfg: Config{
-				Version: "2",
 				Tunnels: []TunnelConfig{
 					{ID: "t1", Name: "a", Type: "local", SSHHost: "h", LocalPort: 0, RemotePort: 80},
 				},

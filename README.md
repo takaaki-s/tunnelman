@@ -108,7 +108,6 @@ Configuration is stored in YAML format:
 ### Example
 
 ```yaml
-version: "2"
 tunnels:
   - id: db-tunnel
     name: Database Tunnel
@@ -188,7 +187,3 @@ make clean    # Remove build artifacts
 ## License
 
 MIT License - see LICENSE file for details
-
-## Author
-
-Takaaki Sato
