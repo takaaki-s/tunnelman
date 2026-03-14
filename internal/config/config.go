@@ -12,7 +12,6 @@ import (
 
 // Config represents the tunnelman configuration file.
 type Config struct {
-	Version     string             `yaml:"version"`
 	Profiles    []ProfileConfig    `yaml:"profiles,omitempty"`
 	Tunnels     []TunnelConfig     `yaml:"tunnels,omitempty"`
 	HealthCheck *HealthCheckConfig `yaml:"health_check,omitempty"`
@@ -101,7 +100,6 @@ func SaveConfig(path string, cfg *Config) error {
 // DefaultConfig returns a new config with sensible defaults.
 func DefaultConfig() *Config {
 	return &Config{
-		Version: "2",
 		Tunnels: []TunnelConfig{},
 	}
 }
