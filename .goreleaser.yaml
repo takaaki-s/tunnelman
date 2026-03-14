@@ -1,0 +1,26 @@
+version: 2
+
+builds:
+  - main: ./cmd/tunnelman
+    binary: tunnelman
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X github.com/takaaki-s/tunnelman/cmd/tunnelman/cmd.Version={{.Version}}
+
+archives:
+  - format: tar.gz
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^chore:"
+      - "^ci:"
