@@ -10,6 +10,9 @@ import (
 	"github.com/takaaki-s/tunnelman/internal/daemon"
 )
 
+// Version is set at build time via ldflags.
+var Version = "dev"
+
 var (
 	jsonOutput bool
 	socketPath string
@@ -17,9 +20,10 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "tunnelman",
-	Short: "SSH tunnel manager",
-	Long:  "tunnelman manages SSH tunnels through a daemon process.",
+	Use:     "tunnelman",
+	Short:   "SSH tunnel manager",
+	Long:    "tunnelman manages SSH tunnels through a daemon process.",
+	Version: Version,
 }
 
 func init() {
