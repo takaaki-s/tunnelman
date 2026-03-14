@@ -35,10 +35,6 @@ go.work.sum
 .DS_Store
 Thumbs.db
 
-# Application specific
-~/.config/tunnelman/
-~/.local/state/tunnelman/
-
 # Environment files
 .env
 .env.local
@@ -46,5 +42,3 @@ Thumbs.db
 # Debug files
 debug
 __debug_bin*
-
-.tasks
