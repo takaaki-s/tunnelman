@@ -37,7 +37,7 @@ func Execute() {
 func outputResult(data any) {
 	if jsonOutput {
 		out := map[string]any{"success": true, "data": data}
-		json.NewEncoder(os.Stdout).Encode(out)
+		_ = json.NewEncoder(os.Stdout).Encode(out)
 	} else {
 		switch v := data.(type) {
 		case string:
@@ -53,7 +53,7 @@ func outputResult(data any) {
 func outputError(code int, msg string) {
 	if jsonOutput {
 		out := map[string]any{"success": false, "error": msg, "code": code}
-		json.NewEncoder(os.Stdout).Encode(out)
+		_ = json.NewEncoder(os.Stdout).Encode(out)
 	} else {
 		fmt.Fprintf(os.Stderr, "Error: %s\n", msg)
 	}

@@ -47,7 +47,7 @@ func setupTestDaemon(t *testing.T) (*daemon.Server, *daemon.Client) {
 	srv := daemon.NewServer(sock, cfg, cfgPath, sm)
 	srv.SetProcessManager(daemon.NewProcessManager(fakeCommander{}))
 
-	go srv.Start()
+	go func() { _ = srv.Start() }()
 
 	client := daemon.NewClient(sock)
 	for i := 0; i < 50; i++ {

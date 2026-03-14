@@ -137,9 +137,7 @@ func (p *Parser) ListHosts() ([]string, error) {
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if strings.HasPrefix(strings.ToLower(line), "host ") {
-			for _, h := range strings.Fields(line[5:]) {
-				hosts = append(hosts, h)
-			}
+			hosts = append(hosts, strings.Fields(line[5:])...)
 		}
 	}
 	if err := scanner.Err(); err != nil {

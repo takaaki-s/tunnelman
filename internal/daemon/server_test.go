@@ -397,7 +397,7 @@ func TestReconnectAfterManualStopAndRestart(t *testing.T) {
 	if pi == nil {
 		t.Fatal("process not found for t1")
 	}
-	pi.Cmd.Process.Kill()
+	_ = pi.Cmd.Process.Kill()
 
 	// Wait for reconnect to fire (it SHOULD because manualStop was cleared by Start)
 	time.Sleep(300 * time.Millisecond)
