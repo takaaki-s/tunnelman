@@ -172,7 +172,7 @@ Local:1080 → SOCKS Proxy → Any destination
 
 ### Requirements
 
-- Go 1.21 or later
+- Go 1.24 or later
 - SSH client installed
 
 ### Build and test
