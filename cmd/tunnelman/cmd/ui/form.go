@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	fieldName        = iota
+	fieldName = iota
 	fieldType
 	fieldSSHHost
 	fieldLocalPort

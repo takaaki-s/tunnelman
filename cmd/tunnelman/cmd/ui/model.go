@@ -13,7 +13,7 @@ import (
 type viewState int
 
 const (
-	viewList   viewState = iota
+	viewList viewState = iota
 	viewForm
 	viewDelete
 	viewHelp
@@ -550,4 +550,3 @@ func removeTunnel(c *daemon.Client, id string) tea.Cmd {
 		return actionDoneMsg(fmt.Sprintf("Deleted: %s", id))
 	}
 }
-

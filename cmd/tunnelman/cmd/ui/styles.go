@@ -9,7 +9,7 @@ var (
 	colorError    = lipgloss.Color("196")
 	colorSelected = lipgloss.Color("63")
 
-	styleHeader = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15"))
+	styleHeader   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15"))
 	styleSelected = lipgloss.NewStyle().
 			Background(colorSelected).
 			Foreground(lipgloss.Color("15"))
