@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -107,6 +108,9 @@ func (s *Server) SetProcessManager(pm *ProcessManager) {
 
 // Start begins listening on the Unix socket.
 func (s *Server) Start() error {
+	if err := os.MkdirAll(filepath.Dir(s.socketPath), 0755); err != nil {
+		return fmt.Errorf("create socket directory: %w", err)
+	}
 	os.Remove(s.socketPath)
 
 	ln, err := net.Listen("unix", s.socketPath)
